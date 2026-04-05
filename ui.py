@@ -624,17 +624,17 @@ class LecturerCourseView(BaseView):
     def load(self):
         try:
             fill_table(self.table, db.get_lecturer_courses(),
-                       ["lec_id", "name", "coursecode", "coursename"])
+                       ["lect_id", "name", "coursecode", "coursename"])
             refresh_combo(self.f_lect, db.get_lecturer_options())
             refresh_combo(self.f_course, db.get_course_options())
         except Exception as e: err(e)
 
     def add(self):
-        lec_id = self.f_lect.currentData()
+        lect_id = self.f_lect.currentData()
         code = self.f_course.currentData()
-        if lec_id is None or code is None: err("Select both a lecturer and a course."); return
+        if lect_id is None or code is None: err("Select both a lecturer and a course."); return
         try:
-            db.add_lecturer_course(lec_id, code)
+            db.add_lecturer_course(lect_id, code)
             self.load(); ok("Qualification added.")
         except Exception as e: err(e)
 
@@ -650,6 +650,8 @@ class LecturerCourseView(BaseView):
 
 # ── SCHEDULE VIEW ─────────────────────────────────────────────────────────────
 
+# ── SCHEDULE VIEW (Program → Course → Lecturer cascading) ────────────────────
+
 DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
 class ScheduleView(BaseView):
@@ -662,37 +664,67 @@ class ScheduleView(BaseView):
         self.layout_.addLayout(top)
 
         self.table = make_table([
-            "Class ID", "Day", "Start", "End",
-            "Room", "Lect ID", "Lecturer", "Course Code", "Course", "PID", "Program"
+            "Class ID", "Day", "Start", "End", "Room",
+            "Program", "Course", "Lecturer", "PID", "Course Code", "Lect ID"
         ])
         self.layout_.addWidget(self.table)
 
         box = QGroupBox("Add / Edit Schedule")
         form = QFormLayout(box)
-        self.f_id = QSpinBox(); self.f_id.setRange(1, 99999)
-        self.f_day = QComboBox(); self.f_day.addItems(DAYS)
-        self.f_start = QTimeEdit(); self.f_start.setDisplayFormat("HH:mm")
-        self.f_end = QTimeEdit(); self.f_end.setDisplayFormat("HH:mm")
+        self.f_id = QSpinBox()
+        self.f_id.setRange(1, 99999)
+        self.f_day = QComboBox()
+        self.f_day.addItems(DAYS)
+        self.f_start = QTimeEdit()
+        self.f_start.setDisplayFormat("HH:mm")
+        self.f_end = QTimeEdit()
+        self.f_end.setDisplayFormat("HH:mm")
         self.f_room = QComboBox()
-        self.f_lect = QComboBox()
-        self.f_course = QComboBox()
-        self.f_pid = QComboBox()
+        self.f_pid = QComboBox()      # Program first
+        self.f_course = QComboBox()   # Course second
+        self.f_lect = QComboBox()     # Lecturer third
+
         form.addRow("Class ID:", self.f_id)
         form.addRow("Day:", self.f_day)
         form.addRow("Start Time:", self.f_start)
         form.addRow("End Time:", self.f_end)
         form.addRow("Room:", self.f_room)
-        form.addRow("Lecturer:", self.f_lect)
-        form.addRow("Course:", self.f_course)
         form.addRow("Program:", self.f_pid)
+        form.addRow("Course:", self.f_course)
+        form.addRow("Lecturer:", self.f_lect)
+
         btn_row = QHBoxLayout()
         for label, slot in [("Add", self.add), ("Edit", self.edit), ("Delete", self.delete)]:
-            b = QPushButton(label); b.clicked.connect(slot); btn_row.addWidget(b)
+            b = QPushButton(label)
+            b.clicked.connect(slot)
+            btn_row.addWidget(b)
         form.addRow(btn_row)
         self.layout_.addWidget(box)
 
+        # Connect cascading signals
+        self.f_pid.currentIndexChanged.connect(self.on_program_changed)
+        self.f_course.currentIndexChanged.connect(self.on_course_changed)
+
         self.table.itemSelectionChanged.connect(self.on_select)
         self.load()
+
+    def on_program_changed(self, index):
+        pid = self.f_pid.currentData()
+        if pid is None:
+            refresh_combo(self.f_course, [])
+            refresh_combo(self.f_lect, [])
+            return
+        courses = db.get_courses_for_program(pid)
+        refresh_combo(self.f_course, courses)
+        refresh_combo(self.f_lect, [])   # reset lecturer until course selected
+
+    def on_course_changed(self, index):
+        course_id = self.f_course.currentData()
+        if course_id is None:
+            refresh_combo(self.f_lect, [])
+            return
+        lecturers = db.get_lecturers_for_course(course_id)
+        refresh_combo(self.f_lect, lecturers)
 
     def load(self):
         try:
@@ -705,58 +737,101 @@ class ScheduleView(BaseView):
                         r[k] = f"{h:02d}:{rem//60:02d}"
                     else:
                         r[k] = str(val)[:5]
+            # Table columns: Class ID, Day, Start, End, Room, Program, Course, Lecturer, PID, Course Code, Lect ID
             fill_table(self.table, rows, [
-                "classid", "day", "start_time", "end_time",
-                "roomid", "lec_id", "lec_name", "course_id", "coursename", "pid", "program_name"
+                "classid", "day", "start_time", "end_time", "roomid",
+                "program_name", "coursename", "lec_name", "pid", "course_id", "lect_id"
             ])
             refresh_combo(self.f_room, db.get_room_options())
-            refresh_combo(self.f_lect, db.get_lecturer_options())
-            refresh_combo(self.f_course, db.get_course_options())
             refresh_combo(self.f_pid, db.get_program_options())
-        except Exception as e: err(e)
+            refresh_combo(self.f_course, [])   # initially empty
+            refresh_combo(self.f_lect, [])     # initially empty
+            # Trigger cascade after load (program may be selected)
+            self.on_program_changed(self.f_pid.currentIndex())
+        except Exception as e:
+            err(e)
 
     def on_select(self):
         rows = self.table.selectedItems()
-        if not rows: return
+        if not rows:
+            return
         self.f_id.setValue(int(rows[0].text()))
         self.f_day.setCurrentText(rows[1].text())
         t_start = QTime.fromString(rows[2].text(), "HH:mm")
         t_end = QTime.fromString(rows[3].text(), "HH:mm")
-        if t_start.isValid(): self.f_start.setTime(t_start)
-        if t_end.isValid(): self.f_end.setTime(t_end)
+        if t_start.isValid():
+            self.f_start.setTime(t_start)
+        if t_end.isValid():
+            self.f_end.setTime(t_end)
+
+        room = rows[4].text()
+        # rows[5] = program_name (display), rows[6] = course_name, rows[7] = lecturer_name
+        # rows[8] = pid, rows[9] = course_code, rows[10] = lect_id
+        pid = int(rows[8].text())
+        course_code = rows[9].text()
+        lect_id = int(rows[10].text())
+
+        # Block signals to prevent cascading updates while setting
+        self.f_pid.blockSignals(True)
+        self.f_course.blockSignals(True)
+        self.f_lect.blockSignals(True)
+
+        # Set room
         for i in range(self.f_room.count()):
-            if self.f_room.itemData(i) == rows[4].text():
-                self.f_room.setCurrentIndex(i); break
-        lect_id = int(rows[5].text())
-        for i in range(self.f_lect.count()):
-            if self.f_lect.itemData(i) == lect_id:
-                self.f_lect.setCurrentIndex(i); break
-        code = rows[7].text()
-        for i in range(self.f_course.count()):
-            if self.f_course.itemData(i) == code:
-                self.f_course.setCurrentIndex(i); break
-        pid = int(rows[9].text())
+            if self.f_room.itemData(i) == room:
+                self.f_room.setCurrentIndex(i)
+                break
+
+        # Set program (this will trigger on_program_changed later, but signals blocked)
         for i in range(self.f_pid.count()):
             if self.f_pid.itemData(i) == pid:
-                self.f_pid.setCurrentIndex(i); break
+                self.f_pid.setCurrentIndex(i)
+                break
+
+        # Manually filter courses for this program and set course
+        courses = db.get_courses_for_program(pid)
+        refresh_combo(self.f_course, courses)
+        for i in range(self.f_course.count()):
+            if self.f_course.itemData(i) == course_code:
+                self.f_course.setCurrentIndex(i)
+                break
+
+        # Manually filter lecturers for this course and set lecturer
+        lecturers = db.get_lecturers_for_course(course_code)
+        refresh_combo(self.f_lect, lecturers)
+        for i in range(self.f_lect.count()):
+            if self.f_lect.itemData(i) == lect_id:
+                self.f_lect.setCurrentIndex(i)
+                break
+
+        # Unblock signals
+        self.f_pid.blockSignals(False)
+        self.f_course.blockSignals(False)
+        self.f_lect.blockSignals(False)
 
     def _validate(self):
         if self.f_start.time() >= self.f_end.time():
-            err("End time must be after start time."); return False
-        lec_id = self.f_lect.currentData()
-        course_id = self.f_course.currentData()
-        pid = self.f_pid.currentData()
+            err("End time must be after start time.")
+            return False
         room = self.f_room.currentData()
-        if None in (room, lec_id, course_id, pid):
-            err("All fields must be selected."); return False
-        if (lec_id, course_id) not in db.get_lec_course_pairs():
-            err("Lecturer is not qualified for this course.\nAdd the qualification in Lecturer Courses first."); return False
+        pid = self.f_pid.currentData()
+        course_id = self.f_course.currentData()
+        lect_id = self.f_lect.currentData()
+        if None in (room, pid, course_id, lect_id):
+            err("All fields must be selected.")
+            return False
+        # Safety checks (should never fail due to cascading dropdowns)
+        if (lect_id, course_id) not in db.get_lec_course_pairs():
+            err("Lecturer is not qualified for this course.\nAdd the qualification in Lecturer Courses first.")
+            return False
         if (pid, course_id) not in db.get_pid_course_pairs():
-            err("Course not assigned to this program.\nAdd it in Program Courses first."); return False
+            err("Course not assigned to this program.\nAdd it in Program Courses first.")
+            return False
         return True
 
     def add(self):
-        if not self._validate(): return
+        if not self._validate():
+            return
         try:
             db.add_schedule(
                 self.f_id.value(), self.f_day.currentText(),
@@ -765,11 +840,14 @@ class ScheduleView(BaseView):
                 self.f_room.currentData(), self.f_lect.currentData(),
                 self.f_course.currentData(), self.f_pid.currentData()
             )
-            self.load(); ok("Schedule added.")
-        except Exception as e: err(e)
+            self.load()
+            ok("Schedule added.")
+        except Exception as e:
+            err(e)
 
     def edit(self):
-        if not self._validate(): return
+        if not self._validate():
+            return
         try:
             db.update_schedule(
                 self.f_id.value(), self.f_day.currentText(),
@@ -778,17 +856,20 @@ class ScheduleView(BaseView):
                 self.f_room.currentData(), self.f_lect.currentData(),
                 self.f_course.currentData(), self.f_pid.currentData()
             )
-            self.load(); ok("Schedule updated.")
-        except Exception as e: err(e)
+            self.load()
+            ok("Schedule updated.")
+        except Exception as e:
+            err(e)
 
     def delete(self):
-        if not confirm("Delete this schedule entry?"): return
+        if not confirm("Delete this schedule entry?"):
+            return
         try:
             db.delete_schedule(self.f_id.value())
-            self.load(); ok("Deleted.")
-        except Exception as e: err(e)
-
-
+            self.load()
+            ok("Deleted.")
+        except Exception as e:
+            err(e)
 # ── MAIN WINDOW ───────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):

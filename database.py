@@ -29,7 +29,7 @@ def execute(query, params=()):
     finally:
         conn.close()
 
-# ── DEPT ──────────────────────────────────────────────────────────────────────
+# ── DEPT ───────────────────────────────────────────────────
 def get_depts():
     return fetch("SELECT * FROM dept ORDER BY deptid")
 
@@ -42,7 +42,7 @@ def delete_dept(deptid):
 def update_dept(deptid, deptname):
     execute("UPDATE dept SET deptname=%s WHERE deptid=%s", (deptname, deptid))
 
-# ── PROGRAM_DEPT ──────────────────────────────────────────────────────────────
+# ── PROGRAM_DEPT ───────────────────────────────────────────
 def get_program_depts():
     return fetch("""
         SELECT pd.program_name, pd.deptid, d.deptname
@@ -56,7 +56,7 @@ def add_program_dept(program_name, deptid):
 def delete_program_dept(program_name):
     execute("DELETE FROM program_dept WHERE program_name=%s", (program_name,))
 
-# ── PROGRAM ───────────────────────────────────────────────────────────────────
+# ── PROGRAM ────────────────────────────────────────────────
 def get_programs():
     return fetch("""
         SELECT p.pid, p.program_name, p.year, p.sem, pd.deptid
@@ -74,7 +74,7 @@ def update_program(pid, program_name, year, sem):
     execute("UPDATE program SET program_name=%s, year=%s, sem=%s WHERE pid=%s",
             (program_name, year, sem, pid))
 
-# ── COURSE ────────────────────────────────────────────────────────────────────
+# ── COURSE ─────────────────────────────────────────────────
 def get_courses():
     return fetch("SELECT * FROM coursetable ORDER BY coursecode")
 
@@ -88,7 +88,7 @@ def update_course(coursecode, coursename, credithour):
     execute("UPDATE coursetable SET coursename=%s, credithour=%s WHERE coursecode=%s",
             (coursename, credithour, coursecode))
 
-# ── PROGRAM_COURSE ────────────────────────────────────────────────────────────
+# ── PROGRAM_COURSE ─────────────────────────────────────────
 def get_program_courses():
     return fetch("""
         SELECT pc.pid, p.program_name, pc.coursecode, c.coursename
@@ -104,7 +104,7 @@ def add_program_course(pid, coursecode):
 def delete_program_course(pid, coursecode):
     execute("DELETE FROM program_course WHERE pid=%s AND coursecode=%s", (pid, coursecode))
 
-# ── ROOM ──────────────────────────────────────────────────────────────────────
+# ── ROOM ───────────────────────────────────────────────────
 def get_rooms():
     return fetch("SELECT * FROM room ORDER BY roomno")
 
@@ -117,7 +117,7 @@ def delete_room(roomno):
 def update_room(roomno, capacity):
     execute("UPDATE room SET capacity=%s WHERE roomno=%s", (capacity, roomno))
 
-# ── NAME_INITIAL ──────────────────────────────────────────────────────────────
+# ── NAME_INITIAL ───────────────────────────────────────────
 def get_name_initials():
     return fetch("SELECT * FROM name_initial ORDER BY name")
 
@@ -127,7 +127,7 @@ def add_name_initial(name, initial):
 def delete_name_initial(name):
     execute("DELETE FROM name_initial WHERE name=%s", (name,))
 
-# ── LECT_DEPT ─────────────────────────────────────────────────────────────────
+# ── LECT_DEPT ──────────────────────────────────────────────
 def get_lecturers():
     return fetch("""
         SELECT ld.lect_id, ld.name, ni.initial, ld.workload, ld.deptid, d.deptname
@@ -141,20 +141,44 @@ def add_lecturer(lect_id, name, initial, workload, deptid):
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO name_initial VALUES (%s, %s)", (name, initial))
-            cur.execute("INSERT INTO lect_dept VALUES (%s, %s, %s, %s)", (lect_id, name, workload, deptid))
+            cur.execute("SELECT name FROM name_initial WHERE name = %s", (name,))
+            if not cur.fetchone():
+                cur.execute("INSERT INTO name_initial VALUES (%s, %s)", (name, initial))
+            cur.execute(
+                "INSERT INTO lect_dept (lect_id, name, workload, deptid) VALUES (%s, %s, %s, %s)",
+                (lect_id, name, workload, deptid)
+            )
         conn.commit()
+    except pymysql.IntegrityError as e:
+        if "Duplicate entry" in str(e) and "name" in str(e):
+            raise Exception(f"Lecturer '{name}' already exists in department {deptid}.")
+        raise
     finally:
         conn.close()
 
 def delete_lecturer(lect_id):
-    execute("DELETE FROM lect_dept WHERE lect_id=%s", (lect_id,))
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT name FROM lect_dept WHERE lect_id = %s", (lect_id,))
+            row = cur.fetchone()
+            if not row:
+                return
+            name = row["name"]
+            cur.execute("DELETE FROM lect_dept WHERE lect_id = %s", (lect_id,))
+            cur.execute("SELECT COUNT(*) as cnt FROM lect_dept WHERE name = %s", (name,))
+            cnt = cur.fetchone()["cnt"]
+            if cnt == 0:
+                cur.execute("DELETE FROM name_initial WHERE name = %s", (name,))
+        conn.commit()
+    finally:
+        conn.close()
 
 def update_lecturer(lect_id, workload, deptid):
     execute("UPDATE lect_dept SET workload=%s, deptid=%s WHERE lect_id=%s",
             (workload, deptid, lect_id))
 
-# ── LECT_PHONENO ──────────────────────────────────────────────────────────────
+# ── LECT_PHONENO ───────────────────────────────────────────
 def get_phone_numbers():
     return fetch("""
         SELECT lect_phoneno.lect_id, lect_dept.name, lect_phoneno.phoneno
@@ -169,52 +193,52 @@ def add_phone(lect_id, phoneno):
 def delete_phone(lect_id, phoneno):
     execute("DELETE FROM lect_phoneno WHERE lect_id=%s AND phoneno=%s", (lect_id, phoneno))
 
-# ── LECTURER_COURSE ───────────────────────────────────────────────────────────
+# ── LECTURER_COURSE ────────────────────────────────────────
 def get_lecturer_courses():
     return fetch("""
-        SELECT lc.lec_id, ld.name, lc.coursecode, c.coursename
+        SELECT lc.lect_id, ld.name, lc.coursecode, c.coursename
         FROM lecturer_course lc
-        JOIN lect_dept ld ON lc.lec_id=ld.lect_id
+        JOIN lect_dept ld ON lc.lect_id=ld.lect_id
         JOIN coursetable c ON lc.coursecode=c.coursecode
-        ORDER BY lc.lec_id
+        ORDER BY lc.lect_id
     """)
 
-def add_lecturer_course(lec_id, coursecode):
-    execute("INSERT INTO lecturer_course VALUES (%s, %s)", (lec_id, coursecode))
+def add_lecturer_course(lect_id, coursecode):
+    execute("INSERT INTO lecturer_course VALUES (%s, %s)", (lect_id, coursecode))
 
-def delete_lecturer_course(lec_id, coursecode):
-    execute("DELETE FROM lecturer_course WHERE lec_id=%s AND coursecode=%s", (lec_id, coursecode))
+def delete_lecturer_course(lect_id, coursecode):
+    execute("DELETE FROM lecturer_course WHERE lect_id=%s AND coursecode=%s", (lect_id, coursecode))
 
-# ── CLASS SCHEDULE ────────────────────────────────────────────────────────────
+# ── CLASS SCHEDULE ─────────────────────────────────────────
 def get_schedules():
     return fetch("""
         SELECT cs.classid, cs.day, cs.start_time, cs.end_time,
-               cs.roomid, cs.lec_id, ld.name AS lec_name,
+               cs.roomid, cs.lect_id, ld.name AS lec_name,
                cs.course_id, c.coursename, cs.pid, p.program_name
         FROM class_schedule cs
         JOIN room r ON cs.roomid=r.roomno
-        JOIN lect_dept ld ON cs.lec_id=ld.lect_id
+        JOIN lect_dept ld ON cs.lect_id=ld.lect_id
         JOIN coursetable c ON cs.course_id=c.coursecode
         JOIN program p ON cs.pid=p.pid
         ORDER BY FIELD(cs.day,'Sunday','Monday','Tuesday','Wednesday','Thursday','Friday'),
                  cs.start_time
     """)
 
-def add_schedule(classid, day, start_time, end_time, roomid, lec_id, course_id, pid):
+def add_schedule(classid, day, start_time, end_time, roomid, lect_id, course_id, pid):
     execute("""
         INSERT INTO class_schedule VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-    """, (classid, day, start_time, end_time, roomid, lec_id, course_id, pid))
+    """, (classid, day, start_time, end_time, roomid, lect_id, course_id, pid))
 
 def delete_schedule(classid):
     execute("DELETE FROM class_schedule WHERE classid=%s", (classid,))
 
-def update_schedule(classid, day, start_time, end_time, roomid, lec_id, course_id, pid):
+def update_schedule(classid, day, start_time, end_time, roomid, lect_id, course_id, pid):
     execute("""
         UPDATE class_schedule SET day=%s, start_time=%s, end_time=%s,
-        roomid=%s, lec_id=%s, course_id=%s, pid=%s WHERE classid=%s
-    """, (day, start_time, end_time, roomid, lec_id, course_id, pid, classid))
+        roomid=%s, lect_id=%s, course_id=%s, pid=%s WHERE classid=%s
+    """, (day, start_time, end_time, roomid, lect_id, course_id, pid, classid))
 
-# ── DROPDOWN HELPERS ──────────────────────────────────────────────────────────
+# ── DROPDOWN HELPERS ───────────────────────────────────────
 def get_dept_options():
     rows = fetch("SELECT deptid, deptname FROM dept ORDER BY deptname")
     return [(r["deptid"], r["deptname"]) for r in rows]
@@ -240,9 +264,51 @@ def get_lecturer_options():
     return [(r["lect_id"], r["name"]) for r in rows]
 
 def get_lec_course_pairs():
-    rows = fetch("SELECT lec_id, coursecode FROM lecturer_course")
-    return {(r["lec_id"], r["coursecode"]) for r in rows}
+    rows = fetch("SELECT lect_id, coursecode FROM lecturer_course")
+    return {(r["lect_id"], r["coursecode"]) for r in rows}
 
 def get_pid_course_pairs():
     rows = fetch("SELECT pid, coursecode FROM program_course")
     return {(r["pid"], r["coursecode"]) for r in rows}
+
+# ========== NEW HELPERS FOR PROGRAM -> COURSE -> LECTURER CASCADE ==========
+def get_courses_for_program(pid):
+    rows = fetch("""
+        SELECT c.coursecode, c.coursename
+        FROM program_course pc
+        JOIN coursetable c ON pc.coursecode = c.coursecode
+        WHERE pc.pid = %s
+        ORDER BY c.coursecode
+    """, (pid,))
+    return [(r["coursecode"], r["coursename"]) for r in rows]
+
+def get_lecturers_for_course(course_id):
+    rows = fetch("""
+        SELECT ld.lect_id, ld.name
+        FROM lecturer_course lc
+        JOIN lect_dept ld ON lc.lect_id = ld.lect_id
+        WHERE lc.coursecode = %s
+        ORDER BY ld.name
+    """, (course_id,))
+    return [(r["lect_id"], r["name"]) for r in rows]
+
+# Keep old helpers for compatibility (if used elsewhere)
+def get_courses_for_lecturer(lect_id):
+    rows = fetch("""
+        SELECT c.coursecode, c.coursename
+        FROM lecturer_course lc
+        JOIN coursetable c ON lc.coursecode = c.coursecode
+        WHERE lc.lect_id = %s
+        ORDER BY c.coursecode
+    """, (lect_id,))
+    return [(r["coursecode"], r["coursename"]) for r in rows]
+
+def get_programs_for_course(course_id):
+    rows = fetch("""
+        SELECT p.pid, p.program_name, p.year, p.sem
+        FROM program_course pc
+        JOIN program p ON pc.pid = p.pid
+        WHERE pc.coursecode = %s
+        ORDER BY p.program_name, p.year, p.sem
+    """, (course_id,))
+    return [(r["pid"], f"{r['program_name']} Y{r['year']}S{r['sem']}") for r in rows]
