@@ -4,7 +4,7 @@ DB_CONFIG = {
     "host": "localhost",
     "user": "root",
     "password": "root1234",
-    "database": "sms_db",
+    "database": "sys_db",
     "cursorclass": pymysql.cursors.DictCursor,
 }
 
@@ -42,7 +42,7 @@ def delete_dept(deptid):
 def update_dept(deptid, deptname):
     execute("UPDATE dept SET deptname=%s WHERE deptid=%s", (deptname, deptid))
 
-# ── PROGRAM_DEPT ───────────────────────────────────────────────────────────────
+# ── PROGRAM_DEPT ──────────────────────────────────────────────────────────────
 def get_program_depts():
     return fetch("""
         SELECT pd.program_name, pd.deptid, d.deptname
@@ -196,7 +196,8 @@ def get_schedules():
         JOIN lect_dept ld ON cs.lec_id=ld.lect_id
         JOIN coursetable c ON cs.course_id=c.coursecode
         JOIN program p ON cs.pid=p.pid
-        ORDER BY cs.day, cs.start_time
+        ORDER BY FIELD(cs.day,'Sunday','Monday','Tuesday','Wednesday','Thursday','Friday'),
+                 cs.start_time
     """)
 
 def add_schedule(classid, day, start_time, end_time, roomid, lec_id, course_id, pid):
@@ -238,16 +239,10 @@ def get_lecturer_options():
     rows = fetch("SELECT lect_id, name FROM lect_dept ORDER BY name")
     return [(r["lect_id"], r["name"]) for r in rows]
 
-def get_name_options():
-    rows = fetch("SELECT name FROM name_initial ORDER BY name")
-    return [r["name"] for r in rows]
-
 def get_lec_course_pairs():
-    """Returns valid (lec_id, coursecode) pairs for schedule validation."""
     rows = fetch("SELECT lec_id, coursecode FROM lecturer_course")
     return {(r["lec_id"], r["coursecode"]) for r in rows}
 
 def get_pid_course_pairs():
-    """Returns valid (pid, coursecode) pairs for schedule validation."""
     rows = fetch("SELECT pid, coursecode FROM program_course")
     return {(r["pid"], r["coursecode"]) for r in rows}
