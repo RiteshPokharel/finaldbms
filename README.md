@@ -56,7 +56,7 @@ pip install PyQt5 pymysql
 
 Open MySQL Workbench, create a database named `sys_db`, and run the provided SQL schema file to create all 11 tables.
 
-run the following SQL:
+run the following SQL locally to connect it through PyMySQL :
 
 ```sql
 -- ------------------------------------------------------------
